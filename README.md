@@ -1,41 +1,44 @@
-# Serverless Web Application on AWS
+# Serverless Visitor Counter on AWS
 
-## Project Name: Serverless Web Application on AWS
+A tiny serverless web app: a static site on S3 that fetches a visitor count from a Lambda function, which increments and returns a counter stored in DynamoDB.
 
-### Project Description:
+## Architecture
 
-In this project, you will build a serverless web application using AWS Lambda, DynamoDB, and S3. The application will allow users to create, read, update, and delete (CRUD) items from a DynamoDB table.
+```
+Browser ──► S3 (static site) ──► API endpoint ──► Lambda ──► DynamoDB
+                                                    │
+                                                    └── returns updated view count
+```
 
-### Project Architecture:
+- **S3** hosts `website/` (`index.html`, `style.css`, `script.js`)
+- **Lambda** (`lambda-function.py`) reads the `views` field, increments it, writes it back, returns the new value
+- **DynamoDB** table `serverless-web-application-on-aws` with a single item at `id = "0"`
 
-![Serverless Web Application on AWS Architecture](https://user-images.githubusercontent.com/66474973/228492073-5cd3d975-3439-4ce4-b109-fb33997df3c3.png)
+## Repository layout
 
-### Steps to Build the Project:
+```
+lambda-function.py   # Python 3 Lambda handler
+website/             # Static frontend served from S3
+  index.html
+  script.js
+  style.css
+```
 
-* Create a DynamoDB table to store the items. \
-* Build a Lambda function to handle the CRUD operations on the DynamoDB table. \
-* Use S3 to store and host the web application's static files (HTML, CSS, and JavaScript). \
-* Create a CloudFront distribution to serve the S3-hosted static files with low latency. \
+## Deploy
 
-### Expected Outcome:
+1. **DynamoDB** — create a table named `serverless-web-application-on-aws` with partition key `id` (String). Seed one item: `{ "id": "0", "views": 0 }`.
+2. **Lambda** — create a Python 3.x function, paste `lambda-function.py`, and attach a role with `dynamodb:GetItem` and `dynamodb:PutItem` on the table.
+3. **API** — expose the Lambda via Function URL or API Gateway. Copy the invoke URL into `website/script.js`.
+4. **S3** — create a bucket, enable static website hosting, and upload the contents of `website/`.
+5. (Optional) Front the bucket with **CloudFront** for HTTPS and caching.
 
-Upon completing the project, you will have a working serverless web application hosted on AWS. \
-You will have hands-on experience building a serverless application using AWS Lambda, DynamoDB, S3, CloudFront. \
-Additionally, you will have experience working with AWS services and integrating them to build a complete solution.
+## Local check
 
-This project will help you improve your skills in cloud computing, serverless architecture, and AWS services.
+```bash
+python3 -c "import ast; ast.parse(open('lambda-function.py').read())"
+```
 
-Link to the documentation: https://docs.google.com/document/d/1FKIs7_yF0D98dHC1D-_pE494EiNF5xhP3s7YCRzw3B8/edit?usp=sharing. 
+## Notes
 
-
-
-Follow our tutorials here: https://www.youtube.com/@amonkincloud/videos \
-Follow our blog here: https://amonkincloud.com/ \
-Follow my personal blog here:https://dev.to/yeshwanthlm/ \
-Follow us on Instagram: https://www.instagram.com/amonkincloud/ \
-For queries write to us at: amonkincloud@gmail.com 
-
-
-
-
-# serverless
+- The Lambda uses `boto3`, which is already available in the AWS Lambda Python runtime — no packaging needed.
+- CORS: if calling from a browser on a different origin, enable CORS on API Gateway or the Function URL.
