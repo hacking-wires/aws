@@ -5,13 +5,14 @@ on:
   pull_request:
 
 jobs:
-  lint:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: pip install -r requirements-dev.txt
       - name: Syntax check
         run: python -m py_compile lambda-function.py
       - name: HTML/JS smoke
@@ -19,3 +20,5 @@ jobs:
           test -f website/index.html
           test -f website/script.js
           test -f website/style.css
+      - name: Tests
+        run: python -m pytest tests/ -q
