@@ -1,44 +1,57 @@
-# Serverless Visitor Counter on AWS
+# AWS Self-Healing Infrastructure
 
-A tiny serverless web app: a static site on S3 that fetches a visitor count from a Lambda function, which increments and returns a counter stored in DynamoDB.
+An in-progress project exploring **self-healing patterns on AWS** — infrastructure that detects failures, recovers on its own, and reports what happened without a human in the loop.
 
-## Architecture
+The idea: build small, composable Lambda-driven controllers that watch CloudWatch signals (alarms, log patterns, metric anomalies) and take corrective action — restart an unhealthy target, roll a bad deploy back, replace a stuck EC2 instance, scale a hot table, page a human only when auto-recovery fails.
 
-```
-Browser ──► S3 (static site) ──► API endpoint ──► Lambda ──► DynamoDB
-                                                    │
-                                                    └── returns updated view count
-```
+## Current state
 
-- **S3** hosts `website/` (`index.html`, `style.css`, `script.js`)
-- **Lambda** (`lambda-function.py`) reads the `views` field, increments it, writes it back, returns the new value
-- **DynamoDB** table `serverless-web-application-on-aws` with a single item at `id = "0"`
+This repo is at the **scaffold** stage — the runtime (Lambda + DynamoDB + static frontend) is wired up so future controllers have somewhere to live and something to visualize. What's checked in right now:
+
+- `lambda-function.py` — a minimal Lambda handler backed by a DynamoDB table (`serverless-web-application-on-aws`). Today it just increments a `views` counter; it's the template every healing controller will be forked from.
+- `website/` — a static frontend (`index.html`, `script.js`, `style.css`) meant to become the ops dashboard: alarm state, recent healing actions, escalation log.
+- `.github/workflows/ci.yml` — syntax + asset smoke test.
+
+## Planned controllers
+
+Each is a small Lambda triggered by an EventBridge rule or a CloudWatch alarm.
+
+| Signal | Action |
+|---|---|
+| EC2 `StatusCheckFailed` | Stop + start the instance; if still bad, terminate so ASG replaces it |
+| ELB target failing health checks for N minutes | Deregister, launch replacement, register |
+| Deployment error rate spike | Auto-rollback via CodeDeploy `StopDeployment` + previous revision |
+| DynamoDB throttled reads | Bump provisioned RCU (or switch to on-demand) |
+| Lambda `Errors` alarm | Divert traffic to previous alias version |
+| Any of the above escalating | Post to SNS → PagerDuty / Slack |
 
 ## Repository layout
 
 ```
-lambda-function.py   # Python 3 Lambda handler
-website/             # Static frontend served from S3
+lambda-function.py          # starter Lambda (will be split per controller)
+website/                    # dashboard scaffold (S3 static hosting)
   index.html
   script.js
   style.css
+.github/workflows/ci.yml    # CI: py_compile + static asset check
 ```
 
-## Deploy
+## Deploy (current scaffold)
 
-1. **DynamoDB** — create a table named `serverless-web-application-on-aws` with partition key `id` (String). Seed one item: `{ "id": "0", "views": 0 }`.
-2. **Lambda** — create a Python 3.x function, paste `lambda-function.py`, and attach a role with `dynamodb:GetItem` and `dynamodb:PutItem` on the table.
-3. **API** — expose the Lambda via Function URL or API Gateway. Copy the invoke URL into `website/script.js`.
-4. **S3** — create a bucket, enable static website hosting, and upload the contents of `website/`.
-5. (Optional) Front the bucket with **CloudFront** for HTTPS and caching.
+1. **DynamoDB** — table `serverless-web-application-on-aws`, partition key `id` (String); seed `{ id: "0", views: 0 }`.
+2. **Lambda** — Python 3.x, paste `lambda-function.py`, attach a role with `dynamodb:GetItem` + `dynamodb:PutItem` on that table.
+3. **Endpoint** — expose via Function URL or API Gateway; drop the URL into `website/script.js`.
+4. **S3** — bucket with static website hosting, upload `website/`.
+5. (Optional) **CloudFront** in front of the bucket for HTTPS + caching.
 
-## Local check
+## Roadmap
 
-```bash
-python3 -c "import ast; ast.parse(open('lambda-function.py').read())"
-```
+- [ ] Move the scaffold Lambda into `controllers/` and split by responsibility
+- [ ] IaC (SAM or Terraform) so the stack is reproducible
+- [ ] First real controller: EC2 status-check auto-remediation
+- [ ] Dashboard: recent alarms + actions taken
+- [ ] SNS escalation path
 
 ## Notes
 
-- The Lambda uses `boto3`, which is already available in the AWS Lambda Python runtime — no packaging needed.
-- CORS: if calling from a browser on a different origin, enable CORS on API Gateway or the Function URL.
+The current Lambda uses `boto3`, which ships with the AWS Lambda Python runtime — no packaging needed. If you call the endpoint from a browser on a different origin, enable CORS on the Function URL / API Gateway.
