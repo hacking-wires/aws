@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Self-healing infrastructure controller: an SNS-triggered Lambda that
+  remediates unhealthy EC2 instances (reboot -> terminate escalation)
+  and exposes a dashboard endpoint listing recent actions.
+
+Parameters:
+  ActionsTableName:
+    Type: String
+    Default: self-healing-actions
+  MaxReboots:
+    Type: Number
+    Default: 2
+  EscalationEmail:
+    Type: String
+    Default: ""
+    Description: (Optional) email to subscribe to the escalation SNS topic.
+
+Conditions:
+  HasEscalationEmail: !Not [!Equals [!Ref EscalationEmail, ""]]
+
+Resources:
+
+  ActionsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Ref ActionsTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: instance_id
+          AttributeType: S
+        - AttributeName: timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: instance_id
+          KeyType: HASH
+        - AttributeName: timestamp
+          KeyType: RANGE
+
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: self-healing-alarms
+
+  EscalationTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: self-healing-escalations
+
+  EscalationSubscription:
+    Type: AWS::SNS::Subscription
+    Condition: HasEscalationEmail
+    Properties:
+      Protocol: email
+      Endpoint: !Ref EscalationEmail
+      TopicArn: !Ref EscalationTopic
+
+  HealerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: self-healing-controller
+      Runtime: python3.12
+      Handler: lambda-function.lambda_handler
+      CodeUri: .
+      Timeout: 30
+      MemorySize: 256
+      Environment:
+        Variables:
+          ACTIONS_TABLE: !Ref ActionsTable
+          MAX_REBOOTS: !Ref MaxReboots
+          ESCALATION_TOPIC_ARN: !Ref EscalationTopic
+      Policies:
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ActionsTable
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ec2:RebootInstances
+                - ec2:TerminateInstances
+                - ec2:DescribeInstances
+              Resource: "*"
+            - Effect: Allow
+              Action: sns:Publish
+              Resource: !Ref EscalationTopic
+      Events:
+        AlarmEvent:
+          Type: SNS
+          Properties:
+            Topic: !Ref AlarmTopic
+      FunctionUrlConfig:
+        AuthType: NONE
+
+Outputs:
+  AlarmTopicArn:
+    Description: Point CloudWatch alarms at this topic
+    Value: !Ref AlarmTopic
+  DashboardUrl:
+    Description: Function URL — append ?view=actions
+    Value: !GetAtt HealerFunctionUrl.FunctionUrl
+  ActionsTable:
+    Value: !Ref ActionsTable

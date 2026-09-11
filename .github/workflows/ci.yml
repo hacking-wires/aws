@@ -5,17 +5,27 @@ on:
   pull_request:
 
 jobs:
-  lint:
+  test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - run: pip install -r requirements.txt
       - name: Syntax check
         run: python -m py_compile lambda-function.py
-      - name: HTML/JS smoke
+      - name: Unit tests
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+        run: python -m unittest discover -s tests -v
+      - name: Frontend assets present
         run: |
           test -f website/index.html
           test -f website/script.js
           test -f website/style.css
+          test -f website/config.js
+      - name: SAM template lint (best-effort)
+        run: |
+          pip install cfn-lint
+          cfn-lint template.yaml || echo "cfn-lint warnings — not failing the build"

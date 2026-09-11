@@ -1,0 +1,4 @@
+{
+    "requestContext": {"http": {"method": "GET"}},
+    "queryStringParameters": {"view": "actions"}
+}
